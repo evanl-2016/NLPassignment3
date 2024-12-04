@@ -7,7 +7,7 @@ Call the constructor for the HMM tagger to begin the training process.  Call wit
 - label - Either "xpos" or "upos" depending on the type of lable you would like the tagger to train on and generate. See https://universaldependencies.org/format.html for more information
 - unknown_threshold - Some float indicating the frequency threshold for words in the corpus that will be dropped. 
 - convergence-threshold - Some float indicating the maximum difference between iterations that can be called convergence, therefore stopping the algorithm
-- test - A boolean that, when true, stops the training process at roughly 10% of the corpus, this can be used for testing and evaluation purposes.
+- test - A boolean that, when true, stops the training process at roughly 25% of the corpus, this can be used for testing and evaluation purposes.
 
 ## Sub-task 2 - K-means clustering
 

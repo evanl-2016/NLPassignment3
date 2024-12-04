@@ -65,7 +65,7 @@ class HMMPOSTagger:
                 self.forward_backward(untagged_data, states, vocab)
                 current_sentence += 1
                 print("Progress: " + str((current_sentence / sentence_count) * 100) + "%")
-                if current_sentence/sentence_count > 0.05 and test:
+                if current_sentence/sentence_count > 0.25 and test:
                     break
             # Generate evaluation stats and store
             eval_data_file = open(conlluFile, "r")
@@ -75,6 +75,9 @@ class HMMPOSTagger:
             accuracies = []
             precisions = []
             recalls = []
+            homo_scores = []
+            comp_scores = []
+            v_scores = []
             for sentence in eval_generator:
                 current_sentence += 1
                 supervised_data = []
@@ -87,15 +90,20 @@ class HMMPOSTagger:
                 tags = np.append(tags, "<END>")
                 tags = np.append(["<START>"], tags)
                 supervised_data = np.array(supervised_data)
-                accuracy, precision, recall = self.evaluate(supervised_data,tags,states, tags)
+                accuracy, precision, recall, homo_score, comp_score, v_score = self.evaluate(supervised_data,tags,states)
                 accuracies.append(accuracy)
                 precisions.append(precision)
                 recalls.append(recall)
+                homo_scores.append(homo_score)
+                comp_scores.append(comp_score)
+                v_scores.append(v_score)
                 if current_sentence/sentence_count > 0.1:
                     break
                 else:
-                    print("Evakuation Progress: " + str((current_sentence / sentence_count) * 100) + "%")
-            eval_file.write(str(np.average(accuracies)) + "," + str(np.average(precisions)) + "," + str(np.average(recalls)) + "\n")
+                    print("Evaluation Progress: " + str((current_sentence / sentence_count) * 100) + "%")
+            outputString = str(np.average(accuracies)) + "," + str(np.average(precisions)) + "," + str(np.average(recalls)) + "," + str(np.average(homo_scores)) + "," + str(np.average(comp_scores)) + "," + str(np.average(v_scores)) + "\n"
+            eval_file.write(outputString)
+            print(outputString)
             # Break if converged
             #if (utils.kl_divergence(np.array(previous_emmission_matrix), np.array(self.emmission_probs)) < convergence_threshold and utils.kl_divergence(np.array(previous_transition_matrix), np.array(self.transition_matrix)) < convergence_threshold):
              #   break
@@ -228,7 +236,7 @@ class HMMPOSTagger:
                 backwards[t,i] = self.log_sum_exp(sum_list)
         return backwards
     
-    def evaluate(self, emission_sequence, tag_sequence, states, tags):
+    def evaluate(self, emission_sequence, tag_sequence, states):
         true_transition_matrix = [[np.exp(self.transition_matrix[i][j]) for i in range(len(states))] for j in range(len(states))]
         true_emission_probs = [{v: np.exp(self.emmission_probs[i][v]) for v in self.emmission_probs[0].keys()} for i in range(len(states))]
         predicted_tags = utils.viterbi(np.array(emission_sequence), len(states), np.array(true_transition_matrix), true_emission_probs)
@@ -262,9 +270,10 @@ class HMMPOSTagger:
                 recalls.append(0.0)
             else:
                 recalls.append(TP/(TP+FN))
+
         
-        homo_score, comp_score, v_score = utils.calculate_v_measure(tag_sequence, [tags.find(predicted_tags[i]) for i in range(len(predicted_tags))])
-        return accuracy, np.average(precisions), np.average(recalls)
+        homo_score, comp_score, v_score = utils.calculate_v_measure(tag_sequence, [list(states).index(str(predicted_tags[i])) for i in range(len(predicted_tags))])
+        return accuracy, np.average(precisions), np.average(recalls), homo_score, comp_score, v_score
 
 ###
 ### Subtask 2: K-means clustering 
@@ -276,20 +285,37 @@ def kMeansClustering(path, k, test, postags):
     sentences = conllu.parse_incr(dataFile)
     datapoints = []
     curr_sentence = 0
-    true_clusters = []
+    true_clusters_unadj = []
     for sentence in sentences:
         curr_sentence += 1
         if curr_sentence >= 100 and test:
             break
         # Read in sentence and add special BERT tokens [CLS] and [SEP]
         data = "[CLS] "
+        true_clusters_unadj = ["[CLS]"]
         for token in sentence:
             data = data + token["form"] + " "
-            true_clusters.append(token[postags])
+            true_clusters_unadj.append(token[postags])
         print(sentence)
         data = data + " [SEP]"
+        true_clusters_unadj.append("[SEP]")
         # Tokenize read data
+        true_clusters = []
+        last_tag = ""
+        last_tag_index = 0
         tokenized_data = tokenizer.tokenize(data)
+        for i in range(len(tokenized_data)):
+            if tokenized_data[i][0:2]== "##":
+                true_clusters.append(last_tag)
+            #elif  tokenized_data[i][0] == "." or tokenized_data[i][0] == "'" or tokenized_data[i][0] == "," or tokenized_data[i][0] == '-':
+            #    true_clusters.append("PUNCT")
+            elif tokenized_data[i][0].isalpha():
+                last_tag = true_clusters_unadj[last_tag_index]
+                last_tag_index += 1
+                true_clusters.append(last_tag)
+            else:
+                true_clusters.append("PUNCT")
+            print(str(tokenized_data[i]) + " = " + str(last_tag))
         # Map token strings to their BERT vocabulary indices
         indexed_tokens = tokenizer.convert_tokens_to_ids(tokenized_data)
         # Generate the ids for the segment, indicating all tokens belong to the same sentence
@@ -353,9 +379,10 @@ def kMeansClustering(path, k, test, postags):
     # Each cluster represents a POS so to obtain true cluster, cluster all words in the datapoints of the same POS
     # Generate scores and write to file
     eval_file = open("KMCeval.txt", "w")
-    homo_score, comp_score, v_score = utils.calculate_v_measure(true_clusters, final_assignments)
+    homo_score, comp_score, v_score = utils.calculate_v_measure(true_clusters, final_assignments[:len(true_clusters)])
     eval_file.write(str(homo_score) + " , " + str(comp_score) + " , " + str(v_score))
+    eval_file.close()
 
-MyTagger = HMMPOSTagger("./ptb-train.conllu", "upos", 0.00005, 5, False, 5)
+MyTagger = HMMPOSTagger("./ptb-train.conllu", "upos", 0.00005, 5, True, 5)
 
-kMeansClustering("./ptb-train.conllu", 45, True)
+#kMeansClustering("./ptb-train.conllu", 45, True, "upos")
